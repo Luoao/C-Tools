@@ -15,6 +15,9 @@ public:
 template<class T>
 class BitAutoPtr
 {
+public:
+   typedef void (*BIT_AUTO_DEL_PTR)(T *pT);
+
 private:
    class Data
    {
@@ -32,6 +35,7 @@ private:
 private:
    Data *m_pData;
    BitAutoPtrLock m_lock;
+   BIT_AUTO_DEL_PTR m_delFun;
    bool m_isOnlyShare;
 
    void Lock() { m_lock.Lock(); }
@@ -53,9 +57,10 @@ private:
       BitAutoPtr<T> *pBitPtr = (BitAutoPtr<T> *)&bitPtr;
       m_pData = pBitPtr->AddRef();
       m_isOnlyShare = pBitPtr->IsShare();
+      m_delFun = pBitPtr->GetDelFun();
    }
 
-   void Init() { m_pData = NULL; m_isOnlyShare = false;  }
+   void Init() { m_pData = NULL; m_isOnlyShare = false; m_delFun = NULL;  }
 
    void ReleaseData() {
       if (m_pData == NULL) {
@@ -66,6 +71,9 @@ private:
       m_pData->m_count -= 1;
       if (m_pData->m_count <= 0) {
          if (m_pData->m_pT != NULL) {
+            if (m_delFun != NULL) {
+               m_delFun(m_pData->m_pT);
+            }
             delete m_pData->m_pT;
             m_pData->m_pT = NULL;
          }
@@ -79,12 +87,11 @@ private:
       BitAutoPtr<T> ret;
       if (m_pData != NULL) {
          if (m_pData->m_pT != NULL) {
-            T *pT = new T();
+            T *pT = new T(*m_pData->m_pT);
             if (pT == NULL) {
                throw BIT_AUTO_PTR_MALLOC_ERR;
             }
             ret = BitAutoPtr<T>(pT);
-            *pT = *m_pData->m_pT;
          }
       }
       return ret;
@@ -92,6 +99,7 @@ private:
 
 public:
    bool IsShare() { return m_isOnlyShare; }
+   BIT_AUTO_DEL_PTR GetDelFun() { return m_delFun; };
 
    Data *AddRef() {
       if (m_pData == NULL) {
@@ -101,6 +109,11 @@ public:
       m_pData->m_count++;
       m_pData->UnLock();
       return m_pData;
+   }
+
+   T *GetData() const {
+      if (m_pData == NULL) { return NULL; }
+      return m_pData->m_pT;
    }
 
    unsigned int GetCount() {
@@ -122,11 +135,12 @@ public:
       *this = bitPtr;
    }
 
-   BitAutoPtr(T *pT, bool isShare = false) {
+   BitAutoPtr(T *pT, BIT_AUTO_DEL_PTR pDelFun = NULL, bool isShare = false) {
       Init();
       m_pData = GetNewData();
       m_pData->m_pT = pT;
       m_isOnlyShare = isShare;
+      m_delFun = pDelFun;
    }
 
    ~BitAutoPtr() {
